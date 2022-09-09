@@ -28,33 +28,57 @@ The template is organized as follows:
     using Avalanche, make sure you are following the same train/eval loop and
     please make sure you are able to export the output in the expected format.
 """
-
+import sys
 import argparse
 import datetime
 from pathlib import Path
 from typing import List
 
 import torch
-from torch.nn import CrossEntropyLoss
+from torch.optim import SGD
+from torchvision import transforms
+from torch.nn import CrossEntropyLoss, Linear
 from torch.optim import SGD
 from torchvision import transforms
 from torchvision.transforms import ToTensor, RandomCrop
+import random
+import numpy as np
+from torch.optim.lr_scheduler import MultiStepLR
 
 from avalanche.benchmarks.utils import Compose
 from avalanche.core import SupervisedPlugin
 from avalanche.evaluation.metrics import accuracy_metrics, loss_metrics, \
-    timing_metrics
-from avalanche.logging import InteractiveLogger, TensorboardLogger
+    timing_metrics, forgetting_metrics, cpu_usage_metrics, confusion_matrix_metrics, disk_usage_metrics
+from avalanche.logging import InteractiveLogger, TensorboardLogger, TextLogger
 from avalanche.models import SimpleMLP
 from avalanche.training.plugins import EvaluationPlugin
-from avalanche.training.supervised import Naive
-from devkit_tools.benchmarks import challenge_classification_benchmark
+from avalanche.training.supervised import Naive, LwF, EWC, GEM, AGEM
+from avalanche.training.supervised.icarl import ICaRL
+
+from devkit_tools.benchmarks import challenge_classification_benchmark, demo_classification_benchmark
 from devkit_tools.metrics.classification_output_exporter import \
     ClassificationOutputExporter
+from devkit_tools.challenge_constants import DEFAULT_CHALLENGE_CLASS_ORDER_SEED
+from os.path import expanduser
+
+from avalanche.benchmarks.datasets import CIFAR100
+from avalanche.benchmarks.utils import AvalancheDataset
+from avalanche.models import IcarlNet, make_icarl_net, initialize_icarl_net
+from avalanche.training.plugins.lr_scheduling import LRSchedulerPlugin
+from avalanche.benchmarks.generators import nc_benchmark
+from avalanche.training.plugins import EvaluationPlugin
+from pytorchcv.model_provider import get_model as ptcv_get_model
+# from avalanche.models.pytorchcv_wrapper import (
+#     vgg,
+#     resnet,
+#     densenet,
+#     pyramidnet,
+#     get_model,
+# )
 
 # TODO: change this to the path where you downloaded (and extracted) the dataset
-DATASET_PATH = Path.home() / '3rd_clvision_challenge' / 'challenge'
-
+# DATASET_PATH = Path.home() / 'clvision-challenge-2022' / 'dataset'
+DATASET_PATH = Path('/project/mayoughi/dataset')
 
 def main(args):
     # --- CONFIG
@@ -86,18 +110,28 @@ def main(args):
     # ---------
 
     # --- BENCHMARK CREATION
+    # benchmark = demo_classification_benchmark(
+    #     dataset_path=DATASET_PATH,
+    #     class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
+    #     train_transform=train_transform,
+    #     eval_transform=eval_transform
+    # )
     benchmark = challenge_classification_benchmark(
         dataset_path=DATASET_PATH,
+        class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
         train_transform=train_transform,
         eval_transform=eval_transform,
-        n_validation_videos=0
+        n_validation_videos=0,
     )
+    print(benchmark.task_labels)
     # ---------
 
     # --- MODEL CREATION
-    model = SimpleMLP(
-        input_size=3*224*224,
-        num_classes=benchmark.n_classes)
+    # model = SimpleMLP(
+    #     input_size=3*224*224,
+    #     num_classes=benchmark.n_classes)
+    model = ptcv_get_model("resnet50", pretrained=True) #imagenet pretrained
+    model.output = Linear(in_features=2048, out_features=benchmark.n_classes, bias=True)
     # ---------
 
     # TODO: Naive == plain fine tuning without replay, regularization, etc.
@@ -119,24 +153,16 @@ def main(args):
 
     # --- METRICS AND LOGGING
     evaluator = EvaluationPlugin(
-        accuracy_metrics(
-            epoch=True,
-            stream=True
-        ),
-        loss_metrics(
-            minibatch=False,
-            epoch_running=True
-        ),
-        # May be useful if using a validation stream
-        # confusion_matrix_metrics(stream=True),
-        timing_metrics(
-            experience=True, stream=True
-        ),
-        loggers=[InteractiveLogger(),
-                 TensorboardLogger(
-                     tb_log_dir='./log/track_inst_cls/exp_' +
-                                datetime.datetime.now().isoformat())
-                 ],
+        accuracy_metrics(minibatch=False, epoch=True, experience=True, stream=True),
+        loss_metrics(minibatch=False, epoch=False, experience=True, stream=True),
+        timing_metrics(epoch=False, epoch_running=True, experience=True, stream=True),
+        forgetting_metrics(experience=True, stream=True),
+        cpu_usage_metrics(experience=False),
+        confusion_matrix_metrics(num_classes=benchmark.n_classes, save_image=True, stream=True),
+        disk_usage_metrics(minibatch=False, epoch=False, experience=False, stream=False),
+        # collect_all=True,
+        loggers=[InteractiveLogger(), TextLogger(open('./output/log_ewc_8workers.txt', 'a')),
+                 TensorboardLogger(tb_log_dir='./log/track_inst_cls/exp_' + datetime.datetime.now().isoformat())],
     )
     # ---------
 
@@ -156,21 +182,81 @@ def main(args):
     #  In particular, you can create a subclass of the SupervisedTemplate
     #  (Naive is mostly an alias for the SupervisedTemplate) and override only
     #  the methods required to implement your solution.
-    cl_strategy = Naive(
+    # cl_strategy = Naive(
+    #     model,
+    #     SGD(model.parameters(), lr=0.001, momentum=0.9),
+    #     CrossEntropyLoss(),
+    #     train_mb_size=100,
+    #     train_epochs=4,
+    #     eval_mb_size=100,
+    #     device=device,
+    #     plugins=plugins,
+    #     evaluator=evaluator,
+    #     eval_every=0 if 'valid' in benchmark.streams else -1
+    # )
+    cl_strategy = EWC(
         model,
         SGD(model.parameters(), lr=0.001, momentum=0.9),
         CrossEntropyLoss(),
-        train_mb_size=100,
-        train_epochs=4,
-        eval_mb_size=100,
+        0.4, #args.ewc_lambda,
+        "online", #args.ewc_mode ["separate", "online"]
+        decay_factor=0.1, #args.decay_factor,
+        train_epochs=10, #args.epochs,
         device=device,
-        plugins=plugins,
+        train_mb_size=100 , #args.minibatch_size,
         evaluator=evaluator,
-        eval_every=0 if 'valid' in benchmark.streams else -1
     )
+
+    # model: IcarlNet = make_icarl_net(num_classes=benchmark.n_classes)
+    # model.apply(initialize_icarl_net)
+    #
+    # optim = SGD(
+    #     model.parameters(),
+    #     lr=2.0,
+    #     weight_decay=0.00001,
+    #     momentum=0.9,
+    # )
+    # sched = LRSchedulerPlugin(
+    #     MultiStepLR(optim, [49, 63], gamma=1.0 / 5.0)
+    # )
+    #
+    # def icarl_egoobjects_augment_data(img):
+    #     img = img.numpy()
+    #     padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant")
+    #     random_cropped = np.zeros(img.shape, dtype=np.float32)
+    #     crop = np.random.randint(0, high=8 + 1, size=(2,))
+    #
+    #     # Cropping and possible flipping
+    #     if np.random.randint(2) > 0:
+    #         random_cropped[:, :, :] = padded[
+    #                                   :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+    #                                   ]
+    #     else:
+    #         random_cropped[:, :, :] = padded[
+    #                                   :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+    #                                   ][:, :, ::-1]
+    #     t = torch.tensor(random_cropped)
+    #     return t
+    #
+    #
+    # cl_strategy = ICaRL(
+    #     model.feature_extractor,
+    #     model.classifier,
+    #     optim,
+    #     memory_size=2000,
+    #     buffer_transform=transforms.Compose([icarl_egoobjects_augment_data]),
+    #     device=device,
+    #     train_mb_size=100,  # args.minibatch_size,
+    #     fixed_memory=True,
+    #     train_epochs=70,
+    #     plugins=plugins + [sched],
+    #     evaluator=evaluator,
+    # )
+
     # ---------
 
     # TRAINING LOOP
+    results = []
     print("Starting experiment...")
     for experience in benchmark.train_stream:
         current_experience_id = experience.current_experience
@@ -178,7 +264,7 @@ def main(args):
         print("Current Classes: ", experience.classes_in_this_experience)
 
         data_loader_arguments = dict(
-            num_workers=10,
+            num_workers=8,
             persistent_workers=True
         )
 
@@ -199,8 +285,12 @@ def main(args):
         print("Training completed")
 
         print("Computing accuracy on the complete test set")
-        cl_strategy.eval(benchmark.test_stream, num_workers=10,
-                         persistent_workers=True)
+        # cl_strategy.eval(benchmark.test_stream, num_workers=10, persistent_workers=True)
+        # results = evaluator.get_all_metrics()
+        results.append(cl_strategy.eval(benchmark.test_stream, num_workers=8, persistent_workers=True))
+        # print(f"All metrics: ", {results})
+        # for k, v in results.items():
+        #     print(k, v)
 
 
 if __name__ == "__main__":

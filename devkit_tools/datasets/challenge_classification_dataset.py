@@ -185,7 +185,8 @@ if __name__ == '__main__':
     from torch.utils.data import DataLoader
     from torchvision.transforms import ToTensor, Resize, Compose
 
-    sample_root: Path = Path.home() / '3rd_clvision_challenge' / 'demo_dataset'
+    # sample_root: Path = Path.home() / '3rd_clvision_challenge' / 'demo_dataset'
+    sample_root = Path("/project/mayoughi/dataset")
     show_images = True
     try_loading = False
     train = True

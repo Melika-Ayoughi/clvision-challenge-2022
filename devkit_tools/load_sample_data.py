@@ -19,7 +19,8 @@ from PIL import Image
 def main():
     import matplotlib
     matplotlib.use('Agg')
-    sample_root: Path = Path.home() / '3rd_clvision_challenge'
+    # sample_root: Path = Path.home() / '3rd_clvision_challenge'
+    sample_root = Path("/project/mayoughi/dataset")
 
     sample_dataset = ChallengeDetectionDataset(root=sample_root)
     ego_api = sample_dataset.ego_api
