@@ -68,18 +68,11 @@ from avalanche.training.plugins.lr_scheduling import LRSchedulerPlugin
 from avalanche.benchmarks.generators import nc_benchmark
 from avalanche.training.plugins import EvaluationPlugin
 from pytorchcv.model_provider import get_model as ptcv_get_model
-# from avalanche.models.pytorchcv_wrapper import (
-#     vgg,
-#     resnet,
-#     densenet,
-#     pyramidnet,
-#     get_model,
-# )
+from avalanche.training.plugins import CoPEPlugin
 
-# TODO: change this to the path where you downloaded (and extracted) the dataset
-# DATASET_PATH = Path.home() / 'clvision-challenge-2022' / 'dataset'
+
 DATASET_PATH = Path('/project/mayoughi/dataset')
-EXP_NAME = "icarl" #"log_ewc_8workers"
+EXP_NAME = "cope"
 
 def main(args):
     # --- CONFIG
@@ -88,11 +81,7 @@ def main(args):
         if args.cuda >= 0 and torch.cuda.is_available()
         else "cpu"
     )
-    # ---------
 
-    # --- TRANSFORMATIONS
-    # This is the normalization used in torchvision models
-    # https://pytorch.org/vision/stable/models.html
     torchvision_normalization = transforms.Normalize(
         mean=[0.485,  0.456, 0.406],
         std=[0.229, 0.224, 0.225])
@@ -110,13 +99,6 @@ def main(args):
     )
     # ---------
 
-    # --- BENCHMARK CREATION
-    # benchmark = demo_classification_benchmark(
-    #     dataset_path=DATASET_PATH,
-    #     class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
-    #     train_transform=train_transform,
-    #     eval_transform=eval_transform
-    # )
     benchmark = challenge_classification_benchmark(
         dataset_path=DATASET_PATH,
         class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
@@ -124,25 +106,17 @@ def main(args):
         eval_transform=eval_transform,
         n_validation_videos=0,
     )
-    print(benchmark.task_labels)
+
     # ---------
 
     # --- MODEL CREATION
     # model = SimpleMLP(
     #     input_size=3*224*224,
     #     num_classes=benchmark.n_classes)
-    # model = ptcv_get_model("resnet50", pretrained=True) #imagenet pretrained
-    # model.output = Linear(in_features=2048, out_features=benchmark.n_classes, bias=True)
+    model = ptcv_get_model("resnet50", pretrained=True) #imagenet pretrained
+    model.output = Linear(in_features=2048, out_features=benchmark.n_classes, bias=True)
     # ---------
 
-    # TODO: Naive == plain fine tuning without replay, regularization, etc.
-    # For the challenge, you'll have to implement your own strategy (or a
-    # strategy plugin that changes the behaviour of the SupervisedTemplate)
-
-    # --- PLUGINS CREATION
-    # Avalanche already has a lot of plugins you can use!
-    # Many mainstream continual learning approaches are available as plugins:
-    # https://avalanche-api.continualai.org/en/latest/training.html#training-plugins
     mandatory_plugins = [
         ClassificationOutputExporter(
             benchmark, save_folder=f'./output/baseline/{EXP_NAME}/instance_classification_results')
@@ -167,91 +141,21 @@ def main(args):
     )
     # ---------
 
-    # --- CREATE THE STRATEGY INSTANCE
-    # In Avalanche, you can customize the training loop in 3 ways:
-    #   1. Adapt the make_train_dataloader, make_optimizer, forward,
-    #   criterion, backward, optimizer_step (and other) functions. This is the
-    #   clean way to do things!
-    #   2. Change the loop itself by reimplementing training_epoch or even
-    #   _train_exp (not recommended).
-    #   3. Create a Plugin that, by implementing the proper callbacks,
-    #   can modify the behavior of the strategy.
-    #  -------------
-    #  Consider that popular strategies (EWC, LwF, Replay) are implemented
-    #  as plugins. However, writing a plugin from scratch may be a tad
-    #  tedious. For the challenge, we recommend going with the 1st option.
-    #  In particular, you can create a subclass of the SupervisedTemplate
-    #  (Naive is mostly an alias for the SupervisedTemplate) and override only
-    #  the methods required to implement your solution.
-    # cl_strategy = Naive(
-    #     model,
-    #     SGD(model.parameters(), lr=0.001, momentum=0.9),
-    #     CrossEntropyLoss(),
-    #     train_mb_size=100,
-    #     train_epochs=10,
-    #     eval_mb_size=100,
-    #     device=device,
-    #     plugins=plugins,
-    #     evaluator=evaluator,
-    #     eval_every=0 if 'valid' in benchmark.streams else -1
-    # )
-    # cl_strategy = EWC(
-    #     model,
-    #     SGD(model.parameters(), lr=0.001, momentum=0.9),
-    #     CrossEntropyLoss(),
-    #     0.4, #args.ewc_lambda,
-    #     "online", #args.ewc_mode ["separate", "online"]
-    #     decay_factor=0.1, #args.decay_factor,
-    #     train_epochs=10, #args.epochs,
-    #     device=device,
-    #     train_mb_size=100 , #args.minibatch_size,
-    #     evaluator=evaluator,
-    # )
-
-    model: IcarlNet = make_icarl_net(num_classes=benchmark.n_classes)
-    model.apply(initialize_icarl_net)
-
-    optim = SGD(
-        model.parameters(),
-        lr=2.0,
-        weight_decay=0.00001,
-        momentum=0.9,
-    )
-    sched = LRSchedulerPlugin(
-        MultiStepLR(optim, [49, 63], gamma=1.0 / 5.0)
+    # CoPE PLUGIN
+    cope = CoPEPlugin(
+        mem_size=2000, alpha=0.99, p_size=benchmark.n_classes, n_classes=benchmark.n_classes
     )
 
-    def icarl_egoobjects_augment_data(img):
-        img = img.numpy()
-        print(img.shape)
-        padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant") # no padding in rgb axis and just in width and height
-        random_cropped = np.zeros(img.shape, dtype=np.float32)
-        crop = np.random.randint(0, high=8 + 1, size=(2,))
-
-        # Cropping and possible flipping
-        if np.random.randint(2) > 0:
-            random_cropped[:, :, :] = padded[
-                                      :, crop[0]: (crop[0] + 224), crop[1]: (crop[1] + 224)
-                                      ]
-        else:
-            random_cropped[:, :, :] = padded[
-                                      :, crop[0]: (crop[0] + 224), crop[1]: (crop[1] + 224)
-                                      ][:, :, ::-1]
-        t = torch.tensor(random_cropped)
-        return t
-
-
-    cl_strategy = ICaRL(
-        model.feature_extractor,
-        model.classifier,
-        optim,
-        memory_size=2000,
-        buffer_transform=transforms.Compose([icarl_egoobjects_augment_data]),
-        device=device,
-        train_mb_size=10, #100,  # args.minibatch_size,
-        fixed_memory=True,
+    # CREATE THE STRATEGY INSTANCE (NAIVE) WITH CoPE PLUGIN
+    cl_strategy = Naive(
+        model,
+        torch.optim.SGD(model.parameters(), lr=0.01),
+        cope.ppp_loss,  # CoPE PPP-Loss
+        train_mb_size=10,
         train_epochs=70,
-        plugins=plugins + [sched],
+        eval_mb_size=100,
+        device=device,
+        plugins=plugins + [cope],
         evaluator=evaluator,
     )
 
