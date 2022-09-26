@@ -72,7 +72,7 @@ from avalanche.training.plugins import CoPEPlugin
 
 
 DATASET_PATH = Path('/project/mayoughi/dataset')
-EXP_NAME = "cope"
+EXP_NAME = "cope_splitcifar"
 
 def main(args):
     # --- CONFIG
@@ -99,23 +99,52 @@ def main(args):
     )
     # ---------
 
-    benchmark = challenge_classification_benchmark(
-        dataset_path=DATASET_PATH,
-        class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
-        train_transform=train_transform,
-        eval_transform=eval_transform,
-        n_validation_videos=0,
-    )
+    # benchmark = challenge_classification_benchmark(
+    #     dataset_path=DATASET_PATH,
+    #     class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
+    #     train_transform=train_transform,
+    #     eval_transform=eval_transform,
+    #     n_validation_videos=0,
+    # )
+    def icarl_cifar100_augment_data(img):
+        img = img.numpy()
+        padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant")
+        random_cropped = np.zeros(img.shape, dtype=np.float32)
+        crop = np.random.randint(0, high=8 + 1, size=(2,))
 
+        # Cropping and possible flipping
+        if np.random.randint(2) > 0:
+            random_cropped[:, :, :] = padded[
+                                      :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+                                      ]
+        else:
+            random_cropped[:, :, :] = padded[
+                                      :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+                                      ][:, :, ::-1]
+        t = torch.tensor(random_cropped)
+        return t
+
+    from avalanche.benchmarks import Experience, SplitCIFAR100, SplitCIFAR110
+    benchmark = SplitCIFAR100(10, shuffle=False, return_task_id=False, train_transform=Compose(
+        [  # RandomCrop(224, padding=10, pad_if_needed=True),
+            ToTensor(),
+            icarl_cifar100_augment_data]
+    ), eval_transform=Compose(
+        [ToTensor()]
+    ))
+    print(benchmark.task_labels)
     # ---------
 
     # --- MODEL CREATION
     # model = SimpleMLP(
     #     input_size=3*224*224,
     #     num_classes=benchmark.n_classes)
-    model = ptcv_get_model("resnet50", pretrained=True) #imagenet pretrained
-    model.output = Linear(in_features=2048, out_features=benchmark.n_classes, bias=True)
-    # ---------
+    # model = ptcv_get_model("resnet50", pretrained=True) #imagenet pretrained
+    # model.output = Linear(in_features=2048, out_features=benchmark.n_classes, bias=True)
+    model = SimpleMLP(
+        input_size=3*32*32,
+        num_classes=benchmark.n_classes)
+
 
     mandatory_plugins = [
         ClassificationOutputExporter(
@@ -152,7 +181,7 @@ def main(args):
         torch.optim.SGD(model.parameters(), lr=0.01),
         cope.ppp_loss,  # CoPE PPP-Loss
         train_mb_size=10,
-        train_epochs=70,
+        train_epochs=5, #70,
         eval_mb_size=100,
         device=device,
         plugins=plugins + [cope],
