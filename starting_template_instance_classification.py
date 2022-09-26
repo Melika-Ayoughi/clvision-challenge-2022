@@ -79,7 +79,7 @@ from pytorchcv.model_provider import get_model as ptcv_get_model
 # TODO: change this to the path where you downloaded (and extracted) the dataset
 # DATASET_PATH = Path.home() / 'clvision-challenge-2022' / 'dataset'
 DATASET_PATH = Path('/project/mayoughi/dataset')
-EXP_NAME = "icarl" #"log_ewc_8workers"
+EXP_NAME = "icarl_ego_debug" #"log_ewc_8workers"
 
 def main(args):
     # --- CONFIG
@@ -99,7 +99,7 @@ def main(args):
 
     # Add additional transformations here
     train_transform = Compose(
-        [RandomCrop(224, padding=10, pad_if_needed=True),
+        [#RandomCrop(224, padding=10, pad_if_needed=True),
          ToTensor(),
          torchvision_normalization]
     )
@@ -117,13 +117,90 @@ def main(args):
     #     train_transform=train_transform,
     #     eval_transform=eval_transform
     # )
-    benchmark = challenge_classification_benchmark(
-        dataset_path=DATASET_PATH,
-        class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
-        train_transform=train_transform,
-        eval_transform=eval_transform,
-        n_validation_videos=0,
-    )
+    # benchmark = challenge_classification_benchmark(
+    #     dataset_path=DATASET_PATH,
+    #     class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
+    #     train_transform=train_transform,
+    #     eval_transform=eval_transform,
+    #     n_validation_videos=0,
+    # )
+    def icarl_cifar100_augment_data(img):
+        img = img.numpy()
+        padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant")
+        random_cropped = np.zeros(img.shape, dtype=np.float32)
+        crop = np.random.randint(0, high=8 + 1, size=(2,))
+
+        # Cropping and possible flipping
+        if np.random.randint(2) > 0:
+            random_cropped[:, :, :] = padded[
+                                      :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+                                      ]
+        else:
+            random_cropped[:, :, :] = padded[
+                                      :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+                                      ][:, :, ::-1]
+        t = torch.tensor(random_cropped)
+        return t
+
+    # transforms_group = dict(
+    #     eval=(
+    #         transforms.Compose(
+    #             [
+    #                 transforms.ToTensor(),
+    #                 # lambda img_pattern: img_pattern - per_pixel_mean,
+    #             ]
+    #         ),
+    #         None,
+    #     ),
+    #     train=(
+    #         transforms.Compose(
+    #             [
+    #                 transforms.ToTensor(),
+    #                 # lambda img_pattern: img_pattern - per_pixel_mean,
+    #                 icarl_cifar100_augment_data,
+    #             ]
+    #         ),
+    #         None,
+    #     ),
+    # )
+
+    # train_set = CIFAR100(
+    #     expanduser("~") + "/.avalanche/data/cifar100/",
+    #     train=True,
+    #     download=True,
+    # )
+    # test_set = CIFAR100(
+    #     expanduser("~") + "/.avalanche/data/cifar100/",
+    #     train=False,
+    #     download=True,
+    # )
+    #
+    # train_set = AvalancheDataset(
+    #     train_set,
+    #     transform_groups=transforms_group,
+    #     initial_transform_group="train",
+    # )
+    # test_set = AvalancheDataset(
+    #     test_set,
+    #     transform_groups=transforms_group,
+    #     initial_transform_group="eval",
+    # )
+    #
+    # benchmark = nc_benchmark(
+    #     train_dataset=train_set,
+    #     test_dataset=test_set,
+    #     n_experiences=10,
+    #     task_labels=False,
+    #     shuffle=False,
+    # )
+    from avalanche.benchmarks import Experience, SplitCIFAR100, SplitCIFAR110
+    benchmark = SplitCIFAR100(10, shuffle=False, return_task_id=False, train_transform=Compose(
+        [#RandomCrop(224, padding=10, pad_if_needed=True),
+         ToTensor(),
+         icarl_cifar100_augment_data]
+    ), eval_transform=Compose(
+        [ToTensor()]
+    ))
     print(benchmark.task_labels)
     # ---------
 
@@ -246,11 +323,11 @@ def main(args):
         model.classifier,
         optim,
         memory_size=2000,
-        buffer_transform=transforms.Compose([icarl_egoobjects_augment_data]),
+        buffer_transform=transforms.Compose([icarl_cifar100_augment_data]),
         device=device,
         train_mb_size=10, #100,  # args.minibatch_size,
         fixed_memory=True,
-        train_epochs=70,
+        train_epochs=1, #70,
         plugins=plugins + [sched],
         evaluator=evaluator,
     )
@@ -266,7 +343,7 @@ def main(args):
         print("Current Classes: ", experience.classes_in_this_experience)
 
         data_loader_arguments = dict(
-            num_workers=8,
+            num_workers=4,
             persistent_workers=True
         )
 
@@ -289,7 +366,7 @@ def main(args):
         print("Computing accuracy on the complete test set")
         # cl_strategy.eval(benchmark.test_stream, num_workers=10, persistent_workers=True)
         # results = evaluator.get_all_metrics()
-        results.append(cl_strategy.eval(benchmark.test_stream, num_workers=8, persistent_workers=True))
+        results.append(cl_strategy.eval(benchmark.test_stream, num_workers=4, persistent_workers=True))
         # print(f"All metrics: ", {results})
         # for k, v in results.items():
         #     print(k, v)

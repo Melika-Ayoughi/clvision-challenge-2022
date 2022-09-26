@@ -2,7 +2,7 @@
 #SBATCH -p gpu_shared
 #SBATCH --gpus=1
 #SBATCH -t 15:00:00
-#SBATCH -o /home/mayoughi/clvision-challenge-2022/output/baseline/icarl/log.out
+#SBATCH -o /home/mayoughi/clvision-challenge-2022/output/baseline/icarl_ego_debug/log.out
 export PYTHONPATH=$PYTHONPATH:$HOME/clvision-challenge-2022/avalanche
 
 module list
