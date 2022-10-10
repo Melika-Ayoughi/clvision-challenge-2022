@@ -20,7 +20,7 @@ from devkit_tools.challenge_constants import \
     DEFAULT_DEMO_TEST_JSON, DEFAULT_CHALLENGE_TRAIN_JSON, \
     DEFAULT_CHALLENGE_TEST_JSON
 from ego_objects import EgoObjects
-
+import json
 
 def challenge_classification_benchmark(
         dataset_path: Union[str, Path],
@@ -114,7 +114,7 @@ def challenge_classification_benchmark(
     val_img_ids = set()
     if n_validation_videos > 0:
         random.seed(validation_video_selection_seed)
-        class_to_videos_dict = ChallengeClassificationDataset.class_to_videos(
+        reversed, class_to_videos_dict = ChallengeClassificationDataset.class_to_videos(
             ego_api=train_ego_api, img_ids=train_dataset.img_ids,
             instance_level=instance_level
         )
@@ -128,16 +128,88 @@ def challenge_classification_benchmark(
         # Iterating through sorted(...) IDs ensures that, given a seed,
         # the same videos are selected every run (determinism)
         classes_ids = sorted(class_to_videos_dict.keys())
+        train_video_ids, val_video_ids, test_video_ids = [], [], []
         for cls_id in classes_ids:
             videos_dict = class_to_videos_dict[cls_id]
             video_ids = list(sorted(videos_dict.keys()))
 
             selected_val_videos = random.sample(
                 video_ids, k=n_validation_videos)
+            shuffled_video_ids = random.sample(video_ids, k=len(video_ids))
+            val_video_ids.append(shuffled_video_ids[0])
+            test_video_ids.append(shuffled_video_ids[1])
+            train_video_ids.extend(shuffled_video_ids[2:])
 
             for video_id in selected_val_videos:
                 # validation_cls_imgs[cls_id].extend(videos_dict[video_id])
                 val_img_ids.update(videos_dict[video_id])
+
+
+    def load_json(path):
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def save_json(data, path):
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    build_data = False
+    if build_data is True:
+
+        train_json = load_json(str(Path('/project/mayoughi/dataset') / 'ego_objects_challenge_train_original.json'))
+
+        gaia_to_img = {}
+        for cls in class_to_videos_dict.keys():
+            for gaia_id, img_ids in class_to_videos_dict[cls].items():
+                if gaia_id in gaia_to_img.keys():
+                    gaia_to_img[gaia_id].extend(img_ids)
+                    print("it exists")
+                else:
+                    gaia_to_img[gaia_id] = img_ids
+
+
+        val_images, test_images, train_images = [], [], []
+        for gaia_id_val, gaia_id_test in zip(val_video_ids, test_video_ids):
+            val_images.extend(gaia_to_img[gaia_id_val])
+            test_images.extend(gaia_to_img[gaia_id_test])
+        for gaia_id_train in train_video_ids:
+            train_images.extend(gaia_to_img[gaia_id_train])
+
+        validation_set, test_set, train_set = {}, {}, {}
+        validation_set["annotations"], test_set["annotations"], train_set["annotations"] = [], [], []
+        for ann in train_json['annotations']:
+            if ann['image_id'] in val_images:
+                validation_set["annotations"].append(ann)
+            elif ann['image_id'] in test_images:
+                test_set["annotations"].append(ann)
+            elif ann['image_id'] in train_images:
+                train_set["annotations"].append(ann)
+
+        validation_set["images"], test_set["images"], train_set["images"] = [], [], []
+        validation_set["info"], test_set["info"], train_set["info"] = train_json['info'], train_json['info'], train_json['info']
+        validation_set["categories"], test_set["categories"], train_set["categories"] = train_json['categories'], train_json['categories'], train_json['categories']
+        for image in train_json['images']:
+            if image['gaia_id'] in val_video_ids:
+                validation_set["images"].append(image)
+            elif image['gaia_id'] in test_video_ids:
+                test_set["images"].append(image)
+            elif image['gaia_id'] in train_video_ids:
+                train_set["images"].append(image)
+        # id = 1
+        # for ann in train_set["annotations"]:
+        #     ann['id'] = id
+        #     id += 1
+        # id = 1
+        # for ann in validation_set["annotations"]:
+        #     ann['id'] = id
+        #     id += 1
+        # id = 1
+        # for ann in test_set["annotations"]:
+        #     ann['id'] = id
+        #     id += 1
+        save_json(test_set, "test_.json")
+        save_json(validation_set, "validation_.json")
+        save_json(train_set, "train_.json")
 
     avl_train_dataset = AvalancheDataset(
         train_dataset,
@@ -163,6 +235,10 @@ def challenge_classification_benchmark(
             per_exp_classes = dict()
             for exp_id in range(remainder_n_classes):
                 per_exp_classes[exp_id] = base_n_classes + 1
+
+    per_exp_classes = dict()
+    for exp_id in range(n_exps):
+        per_exp_classes[exp_id] = base_n_classes
 
     # print('per_exp_classes', per_exp_classes)
     # print('base_n_classes', base_n_classes)

@@ -177,7 +177,7 @@ class ChallengeClassificationDataset(PathsDataset):
             remapped_key = reversed_mapping[cls_orig_key]
             remapped_dict[remapped_key] = cls_videos
 
-        return remapped_dict
+        return reversed_mapping, remapped_dict
 
 
 if __name__ == '__main__':
