@@ -79,7 +79,7 @@ from pytorchcv.model_provider import get_model as ptcv_get_model
 # TODO: change this to the path where you downloaded (and extracted) the dataset
 # DATASET_PATH = Path.home() / 'clvision-challenge-2022' / 'dataset'
 DATASET_PATH = Path('/project/mayoughi/dataset')
-EXP_NAME = "icarl_ego_debug" #"log_ewc_8workers"
+# EXP_NAME = "icarl_ego_debug" #"log_ewc_8workers"
 
 def main(args):
     # --- CONFIG
@@ -93,13 +93,13 @@ def main(args):
     # --- TRANSFORMATIONS
     # This is the normalization used in torchvision models
     # https://pytorch.org/vision/stable/models.html
-    torchvision_normalization = transforms.Normalize(
+    torchvision_normalization = transforms.Normalize( #todo
         mean=[0.485,  0.456, 0.406],
         std=[0.229, 0.224, 0.225])
 
     # Add additional transformations here
     train_transform = Compose(
-        [#RandomCrop(224, padding=10, pad_if_needed=True),
+        [RandomCrop(224, padding=10, pad_if_needed=True),
          ToTensor(),
          torchvision_normalization]
     )
@@ -117,30 +117,31 @@ def main(args):
     #     train_transform=train_transform,
     #     eval_transform=eval_transform
     # )
-    # benchmark = challenge_classification_benchmark(
-    #     dataset_path=DATASET_PATH,
-    #     class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
-    #     train_transform=train_transform,
-    #     eval_transform=eval_transform,
-    #     n_validation_videos=0,
-    # )
-    def icarl_cifar100_augment_data(img):
-        img = img.numpy()
-        padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant")
-        random_cropped = np.zeros(img.shape, dtype=np.float32)
-        crop = np.random.randint(0, high=8 + 1, size=(2,))
-
-        # Cropping and possible flipping
-        if np.random.randint(2) > 0:
-            random_cropped[:, :, :] = padded[
-                                      :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
-                                      ]
-        else:
-            random_cropped[:, :, :] = padded[
-                                      :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
-                                      ][:, :, ::-1]
-        t = torch.tensor(random_cropped)
-        return t
+    benchmark = challenge_classification_benchmark(
+        dataset_path=DATASET_PATH,
+        class_order_seed=DEFAULT_CHALLENGE_CLASS_ORDER_SEED,
+        train_transform=train_transform,
+        eval_transform=eval_transform,
+        # n_validation_videos=1,
+        unlabeled_test_set=False,
+    )
+    # def icarl_cifar100_augment_data(img):
+    #     img = img.numpy()
+    #     padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant")
+    #     random_cropped = np.zeros(img.shape, dtype=np.float32)
+    #     crop = np.random.randint(0, high=8 + 1, size=(2,))
+    #
+    #     # Cropping and possible flipping
+    #     if np.random.randint(2) > 0:
+    #         random_cropped[:, :, :] = padded[
+    #                                   :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+    #                                   ]
+    #     else:
+    #         random_cropped[:, :, :] = padded[
+    #                                   :, crop[0]: (crop[0] + 32), crop[1]: (crop[1] + 32)
+    #                                   ][:, :, ::-1]
+    #     t = torch.tensor(random_cropped)
+    #     return t
 
     # transforms_group = dict(
     #     eval=(
@@ -193,26 +194,22 @@ def main(args):
     #     task_labels=False,
     #     shuffle=False,
     # )
-    from avalanche.benchmarks import Experience, SplitCIFAR100, SplitCIFAR110
-    benchmark = SplitCIFAR100(10, shuffle=False, return_task_id=False, train_transform=Compose(
-        [#RandomCrop(224, padding=10, pad_if_needed=True),
-         ToTensor(),
-         icarl_cifar100_augment_data]
-    ), eval_transform=Compose(
-        [ToTensor()]
-    ))
-    print(benchmark.task_labels)
+    # from avalanche.benchmarks import Experience, SplitCIFAR100, SplitCIFAR110
+    # benchmark = SplitCIFAR100(10, shuffle=False, return_task_id=False, train_transform=Compose(
+    #     [#RandomCrop(224, padding=10, pad_if_needed=True),
+    #      ToTensor(),
+    #      icarl_cifar100_augment_data]
+    # ), eval_transform=Compose(
+    #     [ToTensor()]
+    # ))
+    # print(benchmark.task_labels)
     # ---------
 
     # --- MODEL CREATION
     # model = SimpleMLP(
     #     input_size=3*224*224,
     #     num_classes=benchmark.n_classes)
-    # model = ptcv_get_model("resnet50", pretrained=True) #imagenet pretrained
-    # model.output = Linear(in_features=2048, out_features=benchmark.n_classes, bias=True)
     # ---------
-
-    # TODO: Naive == plain fine tuning without replay, regularization, etc.
     # For the challenge, you'll have to implement your own strategy (or a
     # strategy plugin that changes the behaviour of the SupervisedTemplate)
 
@@ -222,14 +219,11 @@ def main(args):
     # https://avalanche-api.continualai.org/en/latest/training.html#training-plugins
     mandatory_plugins = [
         ClassificationOutputExporter(
-            benchmark, save_folder=f'./output/baseline/{EXP_NAME}/instance_classification_results')
+            benchmark, save_folder=f'./output/baseline/{args.EXP_NAME}/instance_classification_results')
     ]
     plugins: List[SupervisedPlugin] = [
-        # ...
     ] + mandatory_plugins
-    # ---------
 
-    # --- METRICS AND LOGGING
     evaluator = EvaluationPlugin(
         accuracy_metrics(minibatch=False, epoch=True, experience=True, stream=True),
         loss_metrics(minibatch=False, epoch=False, experience=True, stream=True),
@@ -239,8 +233,9 @@ def main(args):
         confusion_matrix_metrics(num_classes=benchmark.n_classes, save_image=True, stream=True),
         disk_usage_metrics(minibatch=False, epoch=False, experience=False, stream=False),
         # collect_all=True,
-        loggers=[InteractiveLogger(), TextLogger(open(f'./output/baseline/{EXP_NAME}/log.txt', 'a')),
-                 TensorboardLogger(tb_log_dir=f'./output/baseline/{EXP_NAME}/exp_' + datetime.datetime.now().isoformat())],
+        loggers=[InteractiveLogger(), TextLogger(open(f'./output/baseline/{args.EXP_NAME}/log.txt', 'a')),
+                 TensorboardLogger(tb_log_dir=f'./output/baseline/{args.EXP_NAME}/exp_' + datetime.datetime.now().isoformat())],
+        benchmark=benchmark,
     )
     # ---------
 
@@ -285,54 +280,93 @@ def main(args):
     #     evaluator=evaluator,
     # )
 
-    model: IcarlNet = make_icarl_net(num_classes=benchmark.n_classes)
-    model.apply(initialize_icarl_net)
+    if args.baseline == "icarl":
+        def icarl_egoobjects_augment_data(img):
+            img = img.numpy()
+            padded = np.pad(img, ((0, 0), (4, 4), (4, 4)),
+                            mode="constant")  # no padding in rgb axis and just in width and height
+            random_cropped = np.zeros(img.shape, dtype=np.float32)
+            crop = np.random.randint(0, high=8 + 1, size=(2,))
 
-    optim = SGD(
-        model.parameters(),
-        lr=2.0,
-        weight_decay=0.00001,
-        momentum=0.9,
-    )
-    sched = LRSchedulerPlugin(
-        MultiStepLR(optim, [49, 63], gamma=1.0 / 5.0)
-    )
+            # Cropping and possible flipping
+            if np.random.randint(2) > 0:
+                random_cropped[:, :, :] = padded[
+                                          :, crop[0]: (crop[0] + 224), crop[1]: (crop[1] + 224)
+                                          ]
+            else:
+                random_cropped[:, :, :] = padded[
+                                          :, crop[0]: (crop[0] + 224), crop[1]: (crop[1] + 224)
+                                          ][:, :, ::-1]
+            t = torch.tensor(random_cropped)
+            return t
 
-    def icarl_egoobjects_augment_data(img):
-        img = img.numpy()
-        print(img.shape)
-        padded = np.pad(img, ((0, 0), (4, 4), (4, 4)), mode="constant") # no padding in rgb axis and just in width and height
-        random_cropped = np.zeros(img.shape, dtype=np.float32)
-        crop = np.random.randint(0, high=8 + 1, size=(2,))
+        model: IcarlNet = make_icarl_net(num_classes=benchmark.n_classes)
+        model.apply(initialize_icarl_net)
 
-        # Cropping and possible flipping
-        if np.random.randint(2) > 0:
-            random_cropped[:, :, :] = padded[
-                                      :, crop[0]: (crop[0] + 224), crop[1]: (crop[1] + 224)
-                                      ]
-        else:
-            random_cropped[:, :, :] = padded[
-                                      :, crop[0]: (crop[0] + 224), crop[1]: (crop[1] + 224)
-                                      ][:, :, ::-1]
-        t = torch.tensor(random_cropped)
-        return t
+        optim = SGD(
+            model.parameters(),
+            lr=2.0,
+            weight_decay=0.00001,
+            momentum=0.9,
+        )
 
+        sched = LRSchedulerPlugin(
+            MultiStepLR(optim, [49, 63], gamma=1.0 / 5.0)
+        )
 
-    cl_strategy = ICaRL(
-        model.feature_extractor,
-        model.classifier,
-        optim,
-        memory_size=2000,
-        buffer_transform=transforms.Compose([icarl_cifar100_augment_data]),
-        device=device,
-        train_mb_size=10, #100,  # args.minibatch_size,
-        fixed_memory=True,
-        train_epochs=1, #70,
-        plugins=plugins + [sched],
-        evaluator=evaluator,
-    )
+        cl_strategy = ICaRL(
+            model.feature_extractor,
+            model.classifier,
+            optim,
+            memory_size=2000,
+            buffer_transform=transforms.Compose([icarl_egoobjects_augment_data]),
+            device=device,
+            train_mb_size=10, #100,  # args.minibatch_size, #todo
+            fixed_memory=True,
+            train_epochs=70,
+            plugins=plugins + [sched],
+            evaluator=evaluator,
+        )
+    elif args.baseline == "naive":
+        # Naive == plain fine tuning without replay, regularization, etc.
 
-    # ---------
+        model = ptcv_get_model("resnet34", pretrained=False)  # imagenet pretrained
+        model.output = Linear(in_features=512, out_features=benchmark.n_classes, bias=True)
+        cl_strategy = Naive(
+            model,
+            SGD(model.parameters(), lr=0.001, momentum=0.9),
+            CrossEntropyLoss(),
+            train_mb_size=100,
+            train_epochs=10,
+            eval_mb_size=100,
+            device=device,
+            plugins=plugins,
+            evaluator=evaluator,
+            eval_every=0 if 'valid' in benchmark.streams else -1
+        )
+    elif args.baseline == "cope":
+        model = ptcv_get_model("resnet34", pretrained=False)  # imagenet pretrained
+        model.output = Linear(in_features=512, out_features=benchmark.n_classes, bias=True)
+
+        from avalanche.training.plugins import CoPEPlugin
+        # CoPE PLUGIN
+        cope = CoPEPlugin(
+            mem_size=2000, alpha=0.99, p_size=benchmark.n_classes, n_classes=benchmark.n_classes
+        )
+
+        # CREATE THE STRATEGY INSTANCE (NAIVE) WITH CoPE PLUGIN
+        cl_strategy = Naive(
+            model,
+            torch.optim.SGD(model.parameters(), lr=0.01),
+            cope.ppp_loss,  # CoPE PPP-Loss
+            train_mb_size=10,
+            train_epochs=5,  # 70,
+            eval_mb_size=100,
+            device=device,
+            plugins=plugins + [cope],
+            evaluator=evaluator,
+        )
+
 
     # TRAINING LOOP
     results = []
@@ -343,7 +377,7 @@ def main(args):
         print("Current Classes: ", experience.classes_in_this_experience)
 
         data_loader_arguments = dict(
-            num_workers=4,
+            num_workers=1,
             persistent_workers=True
         )
 
@@ -366,7 +400,7 @@ def main(args):
         print("Computing accuracy on the complete test set")
         # cl_strategy.eval(benchmark.test_stream, num_workers=10, persistent_workers=True)
         # results = evaluator.get_all_metrics()
-        results.append(cl_strategy.eval(benchmark.test_stream, num_workers=4, persistent_workers=True))
+        results.append(cl_strategy.eval(benchmark.test_stream, num_workers=1, persistent_workers=True))
         # print(f"All metrics: ", {results})
         # for k, v in results.items():
         #     print(k, v)
@@ -378,6 +412,18 @@ if __name__ == "__main__":
         "--cuda",
         type=int,
         default=0,
+        help="Select zero-indexed cuda device. -1 to use CPU.",
+    )
+    parser.add_argument(
+        "--EXP_NAME",
+        type=str,
+        default="cope_ego",
+        help="Select zero-indexed cuda device. -1 to use CPU.",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default="cope",
         help="Select zero-indexed cuda device. -1 to use CPU.",
     )
     args = parser.parse_args()

@@ -7,7 +7,7 @@ def load_json(path):
     with open(path, "r") as f:
         return json.load(f)
 
-def hist:
+def hist():
     train_original = load_json("../../../project/mayoughi/dataset/ego_objects_challenge_train_original.json")
     classes = [ann["instance_id"].split("_")[0] for ann in train_original["annotations"] if ann['id'] != 127172]
 
