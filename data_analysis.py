@@ -2,10 +2,18 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import nltk
+
 
 def load_json(path):
     with open(path, "r") as f:
         return json.load(f)
+
+
+def save_json(data, path):
+    with open(path, "w") as f:
+        json.dump(data, f)
+
 
 def hist():
     train_original = load_json("../../../project/mayoughi/dataset/ego_objects_challenge_train_original.json")
@@ -51,6 +59,72 @@ def creat_histogram(annotation_path, save_pdf_path, sort_order=None):
 
     sorted_ind = [k for k in sorted_class_to_instance.keys()]
     return sorted_ind
+
+
+def build_hierarchy(path="./hierarchy.json"):
+    if os.path.exists(path):
+        return load_json(path)
+
+    train = load_json("../../../project/mayoughi/dataset/train_.json")
+    name_to_synset = load_json("./name_to_synset.json")
+    from nltk.corpus import wordnet
+
+    categories_without_synset = set()
+    edges = set()
+    for cat in train["categories"]:
+        synset_name = "_".join(cat['name'].split(" "))
+
+        # if len(wordnet.synsets(synset_name, pos=wordnet.NOUN)) == 0:
+            # categories_without_synset.add(synset_name)
+
+        if synset_name in name_to_synset:
+            frequent_synset = wordnet.synset(name_to_synset[synset_name])
+        else:
+            # if synset_name not in categories_without_synset:
+            # find most frequent synset
+            freq = -1
+            for synset in wordnet.synsets(synset_name, pos=wordnet.NOUN):
+                sums = sum(lemma.count() for lemma in synset.lemmas())
+                if sums > freq:
+                    frequent_synset = synset
+                    freq = sums
+        father = None
+        # choose the hypernym with the shortest path to root
+        min_hypernym_path = min(frequent_synset.hypernym_paths(), key=len)
+        if min_hypernym_path[1].name() != 'physical_entity.n.01':
+            h_paths = [h_path for h_path in frequent_synset.hypernym_paths() if h_path[1].name() == 'physical_entity.n.01' ]
+            if h_paths:
+                min_hypernym_path = min(h_paths, key=len)
+
+        if synset_name in ["Facial_tissue_holder", "XBox", "PlayStation", "Picnic_basket", "Nightstand", "Nightstand",
+                           "Infant_bed", "High_heels", "Dog_bed", "Bathroom_cabinet", "Bicycle_helmet", "Table_tennis_racket"]:
+            min_hypernym_path.append(f"{synset_name}.n.01")
+        for child in min_hypernym_path:
+            if father is None:
+                father = child
+                continue
+            # print(f"{father}, {child}")
+            if not isinstance(child, nltk.corpus.reader.wordnet.Synset):
+                child_name = child
+            else:
+                child_name = child.name()
+            if not isinstance(father, nltk.corpus.reader.wordnet.Synset):
+                father_name = father
+            else:
+                father_name = father.name()
+
+                edges.add((father_name, child_name))
+            father = child
+        # print(frequent_synset.hypernym_paths())
+    nodes = {}
+    root = next(iter(set(start for start, _ in edges) - set(end for _, end in edges)))
+    for start, end in edges:
+        nodes.setdefault(start, {})[end] = nodes.setdefault(end, {})
+
+    tree = {root: nodes[root]}
+    save_json(tree, path)
+    return tree
+
 
 if __name__ == "__main__":
     sorted_ind = creat_histogram("../../../project/mayoughi/dataset/train_.json", "histogram_train")
