@@ -1,8 +1,9 @@
 #!/bin/bash
 
-#SBATCH -p gpu_shared
+#SBATCH -p gpu_titanrtx
 #SBATCH --gpus=1
-#SBATCH -t 60:00:00
+#SBATCH --constraint=gold_5118
+#SBATCH -t 00:30:00
 #SBATCH -o /home/mayoughi/clvision-challenge-2022/output/baseline/icarl_ego/log.out
 export PYTHONPATH=$PYTHONPATH:$HOME/clvision-challenge-2022/avalanche
 
