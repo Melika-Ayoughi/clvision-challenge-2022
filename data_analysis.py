@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import nltk
+import pandas
+from nltk.corpus import wordnet
 
 
 def load_json(path):
@@ -67,7 +69,6 @@ def build_hierarchy(path="./hierarchy.json"):
 
     train = load_json("../../../project/mayoughi/dataset/train_.json")
     name_to_synset = load_json("./name_to_synset.json")
-    from nltk.corpus import wordnet
 
     categories_without_synset = set()
     edges = set()
@@ -123,10 +124,77 @@ def build_hierarchy(path="./hierarchy.json"):
 
     tree = {root: nodes[root]}
     save_json(tree, path)
+
+    contract(tree)
+    save_json(tree, path)
+
     return tree
 
 
+def contract(tree):
+    to_check = list(tree.keys())
+    next_to_check = []
+    while to_check:
+        for id in to_check:
+            subtree = tree[id]
+            if len(subtree) == 1:
+                # remove the child
+                del (tree[id])
+                subsubid = list(subtree.keys())[0]
+                subsubval = list(subtree.values())[0]
+                tree[subsubid] = subsubval
+                next_to_check.append(subsubid)
+        to_check = next_to_check
+        next_to_check = []
+    for subtree in tree.values():
+        contract(subtree)
+
+
+def path_to_leaves(root, tree, path, pathLen, all_paths):
+    if (len(path) > pathLen):
+        path[pathLen] = root
+        pathLen += 1
+
+    elif root != "start":
+        path.append(root)
+        pathLen += 1
+
+    if not tree.values():
+        all_paths.append(path[0: pathLen])
+        for i in path[0: pathLen]:
+            print(i, " ", end="")
+        print()
+    else:
+        for subid, subtree in tree.items():
+            # print(path)
+            path_to_leaves(subid, subtree, path, pathLen, all_paths)
+
+
+def transitive_closure(all_paths):
+
+    # make sure each edge is included only once
+    edges = set()
+    for path in all_paths:
+        path.reverse()
+        for child in range(len(path)):
+            for parent in range(child + 1, len(path)):
+                edges.add((path[child], path[parent]))
+
+    nouns = pandas.DataFrame(list(edges), columns=['id1', 'id2'])
+    nouns['weight'] = 1
+
+    nouns.to_csv('./noun_closure.csv', index=False)
+    return nouns
+
+
 if __name__ == "__main__":
-    sorted_ind = creat_histogram("../../../project/mayoughi/dataset/train_.json", "histogram_train")
-    creat_histogram("./test_.json", "histogram_test", sorted_ind)
-    creat_histogram("../../../project/mayoughi/dataset/validation_.json", "histogram_val", sorted_ind)
+    train = load_json("../../../project/mayoughi/dataset/train_.json")
+    tree = build_hierarchy("./contracted_hierarchy.json")
+    # tree = {1: {2: {3: {}, 4: {}}, 5: {6: {}, 7: {}, 8: {}}, 9: {}}}
+    path, all_paths = [], []
+    path_to_leaves("start", tree, path, 0, all_paths)
+    nouns = transitive_closure(all_paths)
+
+    # sorted_ind = creat_histogram("../../../project/mayoughi/dataset/train_.json", "histogram_train")
+    # creat_histogram("./test_.json", "histogram_test", sorted_ind)
+    # creat_histogram("../../../project/mayoughi/dataset/validation_.json", "histogram_val", sorted_ind)
