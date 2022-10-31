@@ -81,7 +81,18 @@ from pytorchcv.model_provider import get_model as ptcv_get_model
 DATASET_PATH = Path('/project/mayoughi/dataset')
 # EXP_NAME = "icarl_ego_debug" #"log_ewc_8workers"
 
+
+def reproduce():
+    random.seed(DEFAULT_CHALLENGE_CLASS_ORDER_SEED)
+    np.random.seed(DEFAULT_CHALLENGE_CLASS_ORDER_SEED)
+    torch.manual_seed(DEFAULT_CHALLENGE_CLASS_ORDER_SEED)
+    torch.cuda.manual_seed(DEFAULT_CHALLENGE_CLASS_ORDER_SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.enabled = False
+
+
 def main(args):
+
     # --- CONFIG
     device = torch.device(
         f"cuda:{args.cuda}"
@@ -321,7 +332,7 @@ def main(args):
             memory_size=2000,
             buffer_transform=transforms.Compose([icarl_egoobjects_augment_data]),
             device=device,
-            train_mb_size=10, #100,  # args.minibatch_size, #todo
+            train_mb_size=100,  # args.minibatch_size, #todo
             fixed_memory=True,
             train_epochs=70,
             plugins=plugins + [sched],
@@ -404,9 +415,11 @@ def main(args):
         # print(f"All metrics: ", {results})
         # for k, v in results.items():
         #     print(k, v)
+        torch.save(model, f'./output/baseline/{args.EXP_NAME}/model.pt')
 
 
 if __name__ == "__main__":
+    reproduce()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--cuda",
