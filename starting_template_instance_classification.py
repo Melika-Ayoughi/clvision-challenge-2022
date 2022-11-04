@@ -332,7 +332,7 @@ def main(args):
             memory_size=2000,
             buffer_transform=transforms.Compose([icarl_egoobjects_augment_data]),
             device=device,
-            train_mb_size=100,  # args.minibatch_size, #todo
+            train_mb_size=args.batch_size,
             fixed_memory=True,
             train_epochs=70,
             plugins=plugins + [sched],
@@ -347,7 +347,7 @@ def main(args):
             model,
             SGD(model.parameters(), lr=0.001, momentum=0.9),
             CrossEntropyLoss(),
-            train_mb_size=100,
+            train_mb_size=args.batch_size,
             train_epochs=10,
             eval_mb_size=100,
             device=device,
@@ -370,7 +370,7 @@ def main(args):
             model,
             torch.optim.SGD(model.parameters(), lr=0.01),
             cope.ppp_loss,  # CoPE PPP-Loss
-            train_mb_size=10,
+            train_mb_size=args.batch_size,
             train_epochs=5,  # 70,
             eval_mb_size=100,
             device=device,
@@ -439,5 +439,12 @@ if __name__ == "__main__":
         default="cope",
         help="Select zero-indexed cuda device. -1 to use CPU.",
     )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=100,
+        help="The batch size for training.",
+    )
+
     args = parser.parse_args()
     main(args)
