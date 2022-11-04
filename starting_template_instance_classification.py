@@ -334,7 +334,7 @@ def main(args):
             device=device,
             train_mb_size=args.batch_size,
             fixed_memory=True,
-            train_epochs=70,
+            train_epochs=args.train_epochs,
             plugins=plugins + [sched],
             evaluator=evaluator,
         )
@@ -348,7 +348,7 @@ def main(args):
             SGD(model.parameters(), lr=0.001, momentum=0.9),
             CrossEntropyLoss(),
             train_mb_size=args.batch_size,
-            train_epochs=10,
+            train_epochs=args.train_epochs,
             eval_mb_size=100,
             device=device,
             plugins=plugins,
@@ -371,7 +371,7 @@ def main(args):
             torch.optim.SGD(model.parameters(), lr=0.01),
             cope.ppp_loss,  # CoPE PPP-Loss
             train_mb_size=args.batch_size,
-            train_epochs=5,  # 70,
+            train_epochs=args.train_epochs,
             eval_mb_size=100,
             device=device,
             plugins=plugins + [cope],
@@ -444,6 +444,12 @@ if __name__ == "__main__":
         type=int,
         default=100,
         help="The batch size for training.",
+    )
+    parser.add_argument(
+        "--train_epochs",
+        type=int,
+        default=100,
+        help="The number of training epochs.",
     )
 
     args = parser.parse_args()

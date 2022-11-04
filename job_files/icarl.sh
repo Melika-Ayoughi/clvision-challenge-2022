@@ -16,5 +16,6 @@ cd clvision-challenge-2022/
 python starting_template_instance_classification.py \
 --EXP_NAME "icarl_ego_titan" \
 --baseline "icarl" \
---batch_size 100
+--batch_size 100 \
+--train_epochs 70
 #python run.py

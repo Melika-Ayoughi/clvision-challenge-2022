@@ -15,4 +15,5 @@ cd clvision-challenge-2022/
 python starting_template_instance_classification.py \
 --EXP_NAME "cope_ego" \
 --baseline "cope" \
---batch_size 10
+--batch_size 10 \
+--train_epochs 70

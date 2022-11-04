@@ -14,4 +14,5 @@ cd clvision-challenge-2022/
 python starting_template_instance_classification.py \
 --EXP_NAME "naive_ego" \
 --baseline "naive" \
---batch_size 100
+--batch_size 100 \
+--train_epochs 10
